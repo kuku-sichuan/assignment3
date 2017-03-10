@@ -135,7 +135,23 @@ class CaptioningRNN(object):
     # defined above to store loss and gradients; grads[k] should give the      #
     # gradients for self.params[k].                                            #
     ############################################################################
-    pass
+    h0, i2h_cache= affine_forward(features,W_proj,b_proj)
+    word_vec, word_cach = word_embedding_forward(captions_in,W_embed)
+    if self.cell_type == 'rnn':
+      hidden, rnn_cache = rnn_forward(word_vec,h0,Wx,Wh, b)
+    else:
+      hidden, lstm_cache = lstm_forward(word_vec, h0, Wx, Wh, b)
+    scores, h2v_cache = temporal_affine_forward(hidden, W_vocab, b_vocab)  # [N, T, V]
+    loss, dscores = temporal_softmax_loss(scores, captions_out, mask)
+
+    #backward pass
+    dhidden, grads['W_vocab'], grads['b_vocab'] = temporal_affine_backward(dscores,h2v_cache)
+    if self.cell_type == "rnn":
+      dword_vectors, dh0, grads['Wx'], grads['Wh'], grads['b'] = rnn_backward(dhidden, rnn_cache)
+    else:
+      dword_vectors, dh0, grads['Wx'], grads['Wh'], grads['b'] = lstm_backward(dhidden, lstm_cache)
+    grads['W_embed'] = word_embedding_backward(dword_vectors, word_cach)
+    _, grads['W_proj'], grads['b_proj'] = affine_backward(dh0,i2h_cache)
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################
@@ -197,7 +213,21 @@ class CaptioningRNN(object):
     # functions; you'll need to call rnn_step_forward or lstm_step_forward in #
     # a loop.                                                                 #
     ###########################################################################
-    pass
+    h,_ = affine_forward(features,W_proj,b_proj)
+    h = np.array(h)
+    c = np.zeros_like(h)
+    init_word = np.repeat(self._start, N)
+    captions[:, 0] = init_word
+    V, W = W_embed.shape
+    for i in xrange(1, max_length):
+      onehots = np.eye(V)[captions[:, i-1]]
+      word_vectors = onehots.dot(W_embed)
+      if self.cell_type == "rnn":
+        h,cache = rnn_step_forward(word_vectors,h,Wx, Wh,b)
+      else:
+        h, c, cache = lstm_step_forward(word_vectors,h,c,Wx, Wh, b)
+      scores,_ = affine_forward(h, W_vocab,b_vocab)
+      captions[:,i] = np.argmax(scores, axis=1)
     ############################################################################
     #                             END OF YOUR CODE                             #
     ############################################################################

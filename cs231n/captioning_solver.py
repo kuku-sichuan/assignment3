@@ -1,7 +1,7 @@
 import numpy as np
-
 from cs231n import optim
 from cs231n.coco_utils import sample_coco_minibatch
+from cs231n.classifiers.rnn import CaptioningRNN
 
 
 class CaptioningSolver(object):
@@ -90,6 +90,8 @@ class CaptioningSolver(object):
     self.data = data
     
     # Unpack keyword arguments
+
+    #this implement worth learning!
     self.update_rule = kwargs.pop('update_rule', 'sgd')
     self.optim_config = kwargs.pop('optim_config', {})
     self.lr_decay = kwargs.pop('lr_decay', 1.0)
@@ -174,8 +176,6 @@ class CaptioningSolver(object):
     - acc: Scalar giving the fraction of instances that were correctly
       classified by the model.
     """
-    return 0.0
-    
     # Maybe subsample the data
     N = X.shape[0]
     if num_samples is not None and N > num_samples:
@@ -192,9 +192,10 @@ class CaptioningSolver(object):
     for i in xrange(num_batches):
       start = i * batch_size
       end = (i + 1) * batch_size
-      scores = self.model.loss(X[start:end])
-      y_pred.append(np.argmax(scores, axis=1))
-    y_pred = np.hstack(y_pred)
+      captions = self.model.sample(X[start:end],max_length=17)
+
+      y_pred.append(captions)
+    y_pred = np.vstack(y_pred) # care vstack and hstack differ!
     acc = np.mean(y_pred == y)
 
     return acc
@@ -215,19 +216,43 @@ class CaptioningSolver(object):
       if self.verbose and t % self.print_every == 0:
         print '(Iteration %d / %d) loss: %f' % (
                t + 1, num_iterations, self.loss_history[-1])
-
       # At the end of every epoch, increment the epoch counter and decay the
       # learning rate.
       epoch_end = (t + 1) % iterations_per_epoch == 0
       if epoch_end:
         self.epoch += 1
+
         for k in self.optim_configs:
           self.optim_configs[k]['learning_rate'] *= self.lr_decay
 
       # Check train and val accuracy on the first iteration, the last
       # iteration, and at the end of each epoch.
       # TODO: Implement some logic to check Bleu on validation set periodically
+      first_it = (t == 0)
+      last_it = (t == num_iterations - 1) # I modificate there "-" replace "+"
+      if first_it or last_it or epoch_end:
+        idxs = self.data['train_image_idxs']
+        train_feature = self.data['train_features'][idxs]
+        train_acc = self.check_accuracy(train_feature, self.data['train_captions'],
+                                        num_samples=1000)
+        idxs = self.data['val_image_idxs']
+        val_feature = self.data['val_features'][idxs]
+        val_acc = self.check_accuracy(val_feature, self.data['val_captions'],num_samples=1000)
+        self.train_acc_history.append(train_acc)
+        self.val_acc_history.append(val_acc)
+
+        if self.verbose:
+          print '(Epoch %d / %d) train acc: %f; val_acc: %f' % (
+                 self.epoch, self.num_epochs, train_acc, val_acc)
+
+        # Keep track of the best model
+        if val_acc > self.best_val_acc:
+          self.best_val_acc = val_acc
+          self.best_params = {}
+          for k, v in self.model.params.iteritems():
+            self.best_params[k] = v.copy()
 
     # At the end of training swap the best params into the model
+    self.model.params = self.best_params
+    # At the end of training swap the best params into the model
     # self.model.params = self.best_params
-
